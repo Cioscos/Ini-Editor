@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 import configparser
 import os
 import re
+import platform
 
 
 class CustomConfigParser:
@@ -339,8 +340,65 @@ class IniEditorApp:
         self.current_file = None
         self.current_section = None  # Aggiungiamo una variabile per tenere traccia della sezione corrente
 
+        # Configura scorciatoie da tastiera
+        self.setup_keyboard_shortcuts()
+
         self._create_menu()
         self._create_ui()
+
+    def setup_keyboard_shortcuts(self):
+        """Configura le scorciatoie da tastiera dell'applicazione."""
+        # Ctrl+S per salvare (Cmd+S su macOS)
+        self.root.bind('<Control-s>', lambda event: self.save_file())
+        if platform.system() == 'Darwin':  # macOS
+            self.root.bind('<Command-s>', lambda event: self.save_file())
+
+    def center_window(self, window, width=None, height=None):
+        """
+        Centra una finestra di dialogo rispetto alla finestra principale.
+
+        Args:
+            window: La finestra di dialogo da centrare
+            width: Larghezza della finestra (opzionale)
+            height: Altezza della finestra (opzionale)
+        """
+        if width is not None and height is not None:
+            window.geometry(f"{width}x{height}")
+
+        window.withdraw()
+        window.update_idletasks()
+
+        # Ottiene le dimensioni della finestra
+        win_width = window.winfo_width()
+        win_height = window.winfo_height()
+
+        # Ottiene le dimensioni dello schermo
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+
+        # Ottiene la posizione della finestra principale
+        main_x = self.root.winfo_rootx()
+        main_y = self.root.winfo_rooty()
+        main_width = self.root.winfo_width()
+        main_height = self.root.winfo_height()
+
+        # Calcola la posizione centrata
+        x = main_x + (main_width - win_width) // 2
+        y = main_y + (main_height - win_height) // 2
+
+        # Verifica che la finestra sia visibile nello schermo
+        if x < 0:
+            x = 0
+        if y < 0:
+            y = 0
+        if x + win_width > screen_width:
+            x = screen_width - win_width
+        if y + win_height > screen_height:
+            y = screen_height - win_height
+
+        # Imposta la posizione della finestra
+        window.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        window.deiconify()
 
     def _create_menu(self):
         """Crea la barra del menu per l'applicazione."""
@@ -349,7 +407,7 @@ class IniEditorApp:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Nuovo", command=self.new_file)
         file_menu.add_command(label="Apri", command=self.open_file)
-        file_menu.add_command(label="Salva", command=self.save_file)
+        file_menu.add_command(label="Salva", command=self.save_file, accelerator="Ctrl+S")
         file_menu.add_command(label="Salva con nome", command=self.save_file_as)
         file_menu.add_separator()
         file_menu.add_command(label="Esci", command=self.root.quit)
@@ -478,8 +536,13 @@ class IniEditorApp:
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile aprire il file:\n{str(e)}")
 
-    def save_file(self):
-        """Salva il file .ini corrente."""
+    def save_file(self, event=None):
+        """
+        Salva il file .ini corrente.
+
+        Args:
+            event: Evento della tastiera (opzionale)
+        """
         if not self.current_file:
             self.save_file_as()
             return
@@ -605,6 +668,9 @@ class IniEditorApp:
         ttk.Button(button_frame, text="Salva", command=save_property).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Annulla", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
+        # Centra la finestra di dialogo
+        self.center_window(dialog)
+
     def add_section(self):
         """Aggiunge una nuova sezione al file .ini."""
         dialog = tk.Toplevel(self.root)
@@ -643,6 +709,9 @@ class IniEditorApp:
 
         ttk.Button(dialog, text="Aggiungi", command=do_add_section).pack(pady=5)
 
+        # Centra la finestra di dialogo
+        self.center_window(dialog)
+
     def remove_section(self):
         """Rimuove la sezione selezionata dal file .ini."""
         if not self.current_section:
@@ -655,7 +724,7 @@ class IniEditorApp:
             self.property_tree.delete(*self.property_tree.get_children())
             self.current_section = None
             self.section_label_var.set("Nessuna sezione selezionata")
-            self.status_var.set(f"Sezione '{self.current_section}' rimossa")
+            self.status_var.set(f"Sezione rimossa")
 
     def add_property(self):
         """Aggiunge una nuova proprietà alla sezione selezionata."""
@@ -714,6 +783,9 @@ class IniEditorApp:
 
         ttk.Button(button_frame, text="Aggiungi", command=do_add_property).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Annulla", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        # Centra la finestra di dialogo
+        self.center_window(dialog)
 
     def remove_property(self):
         """Rimuove la proprietà selezionata dalla sezione corrente."""
