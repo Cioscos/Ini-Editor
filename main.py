@@ -3,7 +3,6 @@
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import configparser
 import os
 import re
 import platform
