@@ -337,6 +337,7 @@ class IniEditorApp:
 
         self.config = CustomConfigParser(comment_prefixes=('#', ';'))
         self.current_file = None
+        self.current_section = None  # Aggiungiamo una variabile per tenere traccia della sezione corrente
 
         self._create_menu()
         self._create_ui()
@@ -393,6 +394,11 @@ class IniEditorApp:
         self.right_frame = ttk.Frame(self.main_frame)
         self.main_frame.add(self.right_frame, weight=3)
 
+        # Label per mostrare la sezione corrente
+        self.section_label_var = tk.StringVar(value="Nessuna sezione selezionata")
+        self.section_label = ttk.Label(self.right_frame, textvariable=self.section_label_var, font=("", 10, "bold"))
+        self.section_label.pack(anchor=tk.W, pady=(0, 5))
+
         # Label e bottoni per proprietà
         ttk.Label(self.right_frame, text="Proprietà:").pack(anchor=tk.W)
 
@@ -445,6 +451,8 @@ class IniEditorApp:
         """Crea un nuovo file .ini vuoto."""
         self.config = CustomConfigParser(comment_prefixes=('#', ';'))
         self.current_file = None
+        self.current_section = None
+        self.section_label_var.set("Nessuna sezione selezionata")
         self.update_section_list()
         self.property_tree.delete(*self.property_tree.get_children())
         self.status_var.set("Nuovo file creato")
@@ -462,6 +470,8 @@ class IniEditorApp:
             self.config = CustomConfigParser(comment_prefixes=('#', ';'))
             self.config.read(filepath, encoding='utf-8')
             self.current_file = filepath
+            self.current_section = None
+            self.section_label_var.set("Nessuna sezione selezionata")
             self.update_section_list()
             self.property_tree.delete(*self.property_tree.get_children())
             self.status_var.set(f"File aperto: {os.path.basename(filepath)}")
@@ -519,6 +529,8 @@ class IniEditorApp:
         selection = self.section_listbox.curselection()
         if selection:
             section = self.section_listbox.get(selection[0])
+            self.current_section = section  # Aggiorna la sezione corrente
+            self.section_label_var.set(f"Sezione: [{section}]")  # Aggiorna l'etichetta
             self.update_property_list(section)
 
     def on_property_double_click(self, event):
@@ -530,13 +542,10 @@ class IniEditorApp:
         item = selected_items[0]
         key, value, comment = self.property_tree.item(item, "values")
 
-        # Prima ottieni la sezione corrente e memorizzala
-        selection = self.section_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Avviso", "Seleziona prima una sezione")
+        # Controlla se è selezionata una sezione
+        if not self.current_section:
+            messagebox.showwarning("Avviso", "Nessuna sezione selezionata")
             return
-
-        current_section = self.section_listbox.get(selection[0])
 
         # Finestra di dialogo per modifica
         dialog = tk.Toplevel(self.root)
@@ -545,20 +554,24 @@ class IniEditorApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        ttk.Label(dialog, text="Chiave:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        # Mostra la sezione corrente nella finestra di dialogo
+        ttk.Label(dialog, text=f"Sezione: [{self.current_section}]", font=("", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+
+        ttk.Label(dialog, text="Chiave:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         key_var = tk.StringVar(value=key)
         key_entry = ttk.Entry(dialog, textvariable=key_var, width=50)
-        key_entry.grid(row=0, column=1, padx=5, pady=5)
+        key_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Valore:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(dialog, text="Valore:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
         value_var = tk.StringVar(value=value)
         value_entry = ttk.Entry(dialog, textvariable=value_var, width=50)
-        value_entry.grid(row=1, column=1, padx=5, pady=5)
+        value_entry.grid(row=2, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Note:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(dialog, text="Note:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
         comment_var = tk.StringVar(value=comment if comment else "")
         comment_entry = ttk.Entry(dialog, textvariable=comment_var, width=50)
-        comment_entry.grid(row=2, column=1, padx=5, pady=5)
+        comment_entry.grid(row=3, column=1, padx=5, pady=5)
 
         def save_property():
             new_key = key_var.get()
@@ -567,27 +580,27 @@ class IniEditorApp:
 
             # Rimuovi vecchia chiave se è cambiata
             if new_key != key:
-                self.config.remove_option(current_section, key)
+                self.config.remove_option(self.current_section, key)
 
             # Imposta nuova chiave/valore
-            self.config.set(current_section, new_key, new_value)
+            self.config.set(self.current_section, new_key, new_value)
 
             # Salva il commento inline
             if new_comment:
                 if not new_comment.startswith(('#', ';')):
                     new_comment = '; ' + new_comment
-                self.config.set_inline_comment(current_section, new_key, new_comment)
+                self.config.set_inline_comment(self.current_section, new_key, new_comment)
             else:
                 # Rimuovi eventuali commenti esistenti
-                if current_section in self.config.inline_comments and new_key in self.config.inline_comments[
-                    current_section]:
-                    del self.config.inline_comments[current_section][new_key]
+                if self.current_section in self.config.inline_comments and new_key in self.config.inline_comments[
+                    self.current_section]:
+                    del self.config.inline_comments[self.current_section][new_key]
 
-            self.update_property_list(current_section)
+            self.update_property_list(self.current_section)
             dialog.destroy()
 
         button_frame = ttk.Frame(dialog)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=10)
 
         ttk.Button(button_frame, text="Salva", command=save_property).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Annulla", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
@@ -612,6 +625,17 @@ class IniEditorApp:
                 if not self.config.has_section(section_name):
                     self.config.add_section(section_name)
                     self.update_section_list()
+
+                    # Seleziona la nuova sezione
+                    sections = self.config.get_sections()
+                    idx = sections.index(section_name)
+                    self.section_listbox.selection_clear(0, tk.END)
+                    self.section_listbox.selection_set(idx)
+                    self.section_listbox.see(idx)
+                    self.current_section = section_name
+                    self.section_label_var.set(f"Sezione: [{section_name}]")
+                    self.update_property_list(section_name)
+
                     self.status_var.set(f"Sezione '{section_name}' aggiunta")
                 else:
                     messagebox.showwarning("Avviso", f"La sezione '{section_name}' esiste già")
@@ -621,26 +645,23 @@ class IniEditorApp:
 
     def remove_section(self):
         """Rimuove la sezione selezionata dal file .ini."""
-        selection = self.section_listbox.curselection()
-        if not selection:
+        if not self.current_section:
             messagebox.showwarning("Avviso", "Seleziona prima una sezione")
             return
 
-        section = self.section_listbox.get(selection[0])
-        if messagebox.askyesno("Conferma", f"Rimuovere la sezione '{section}'?"):
-            self.config.remove_section(section)
+        if messagebox.askyesno("Conferma", f"Rimuovere la sezione '{self.current_section}'?"):
+            self.config.remove_section(self.current_section)
             self.update_section_list()
             self.property_tree.delete(*self.property_tree.get_children())
-            self.status_var.set(f"Sezione '{section}' rimossa")
+            self.current_section = None
+            self.section_label_var.set("Nessuna sezione selezionata")
+            self.status_var.set(f"Sezione '{self.current_section}' rimossa")
 
     def add_property(self):
         """Aggiunge una nuova proprietà alla sezione selezionata."""
-        selection = self.section_listbox.curselection()
-        if not selection:
+        if not self.current_section:
             messagebox.showwarning("Avviso", "Seleziona prima una sezione")
             return
-
-        current_section = self.section_listbox.get(selection[0])
 
         dialog = tk.Toplevel(self.root)
         dialog.title("Aggiungi Proprietà")
@@ -648,20 +669,24 @@ class IniEditorApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        ttk.Label(dialog, text="Chiave:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        # Mostra la sezione corrente nella finestra di dialogo
+        ttk.Label(dialog, text=f"Sezione: [{self.current_section}]", font=("", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+
+        ttk.Label(dialog, text="Chiave:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         key_var = tk.StringVar()
         key_entry = ttk.Entry(dialog, textvariable=key_var, width=50)
-        key_entry.grid(row=0, column=1, padx=5, pady=5)
+        key_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Valore:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(dialog, text="Valore:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
         value_var = tk.StringVar()
         value_entry = ttk.Entry(dialog, textvariable=value_var, width=50)
-        value_entry.grid(row=1, column=1, padx=5, pady=5)
+        value_entry.grid(row=2, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Note:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(dialog, text="Note:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
         comment_var = tk.StringVar()
         comment_entry = ttk.Entry(dialog, textvariable=comment_var, width=50)
-        comment_entry.grid(row=2, column=1, padx=5, pady=5)
+        comment_entry.grid(row=3, column=1, padx=5, pady=5)
 
         def do_add_property():
             key = key_var.get().strip()
@@ -672,32 +697,29 @@ class IniEditorApp:
                 messagebox.showwarning("Avviso", "La chiave non può essere vuota")
                 return
 
-            self.config.set(current_section, key, value)
+            self.config.set(self.current_section, key, value)
 
             # Salva il commento inline
             if comment:
                 if not comment.startswith(('#', ';')):
                     comment = '; ' + comment
-                self.config.set_inline_comment(current_section, key, comment)
+                self.config.set_inline_comment(self.current_section, key, comment)
 
-            self.update_property_list(current_section)
-            self.status_var.set(f"Proprietà '{key}' aggiunta a '{current_section}'")
+            self.update_property_list(self.current_section)
+            self.status_var.set(f"Proprietà '{key}' aggiunta a '{self.current_section}'")
             dialog.destroy()
 
         button_frame = ttk.Frame(dialog)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=10)
 
         ttk.Button(button_frame, text="Aggiungi", command=do_add_property).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Annulla", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
     def remove_property(self):
         """Rimuove la proprietà selezionata dalla sezione corrente."""
-        selection = self.section_listbox.curselection()
-        if not selection:
+        if not self.current_section:
             messagebox.showwarning("Avviso", "Seleziona prima una sezione")
             return
-
-        section = self.section_listbox.get(selection[0])
 
         selected_items = self.property_tree.selection()
         if not selected_items:
@@ -708,9 +730,9 @@ class IniEditorApp:
         key = self.property_tree.item(item, "values")[0]
 
         if messagebox.askyesno("Conferma", f"Rimuovere la proprietà '{key}'?"):
-            self.config.remove_option(section, key)
-            self.update_property_list(section)
-            self.status_var.set(f"Proprietà '{key}' rimossa da '{section}'")
+            self.config.remove_option(self.current_section, key)
+            self.update_property_list(self.current_section)
+            self.status_var.set(f"Proprietà '{key}' rimossa da '{self.current_section}'")
 
 
 def main():
