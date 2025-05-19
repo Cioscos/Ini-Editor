@@ -313,6 +313,161 @@ class CustomConfigParser:
             file_obj.write("\n")
 
 
+class HighlightListbox(tk.Frame):
+    """
+    Widget personalizzato che combina un Text con scrollbar per implementare una listbox con evidenziazione.
+
+    Questo widget permette di visualizzare una lista di elementi con evidenziazione
+    delle parti di testo che corrispondono a un termine di ricerca.
+    """
+
+    def __init__(self, master, **kwargs):
+        """
+        Inizializza il widget listbox con evidenziazione.
+
+        Args:
+            master: Widget genitore
+            **kwargs: Argomenti aggiuntivi per configurare il widget
+        """
+        super().__init__(master)
+
+        # Crea il widget Text con scrollbar
+        self.scrollbar = ttk.Scrollbar(self)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.text = tk.Text(self, yscrollcommand=self.scrollbar.set,
+                            wrap=tk.NONE, height=10, width=30)
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar.config(command=self.text.yview)
+
+        # Configura i tag per l'evidenziazione
+        self.text.tag_configure("highlight", background="#FFFF99")
+
+        # Memorizza gli elementi e i callback
+        self.items = []
+        self.selection_callback = None
+
+        # Gestisce il click sul testo
+        self.text.bind("<ButtonRelease-1>", self._on_click)
+
+        # Rende il widget non modificabile
+        self.text.config(state=tk.DISABLED)
+
+    def insert(self, items, search_term=""):
+        """
+        Inserisce gli elementi nel widget e evidenzia il testo cercato.
+
+        Args:
+            items: Lista di elementi da inserire
+            search_term: Termine da evidenziare (se presente)
+        """
+        # Salva gli elementi
+        self.items = items
+
+        # Abilita la modifica del testo
+        self.text.config(state=tk.NORMAL)
+
+        # Pulisce il contenuto esistente
+        self.text.delete(1.0, tk.END)
+
+        # Inserisce gli elementi uno alla volta
+        search_term = search_term.lower()
+        for i, item in enumerate(items):
+            if search_term and len(search_term) >= 2:
+                # Trova le posizioni del termine di ricerca
+                item_lower = item.lower()
+                start_pos = 0
+                while True:
+                    pos = item_lower.find(search_term, start_pos)
+                    if pos == -1:
+                        break
+
+                    # Inserisci il testo fino al punto di evidenziazione
+                    if pos > start_pos:
+                        self.text.insert(tk.END, item[start_pos:pos])
+
+                    # Inserisci il testo evidenziato
+                    highlight_end = pos + len(search_term)
+                    self.text.insert(tk.END, item[pos:highlight_end], "highlight")
+
+                    # Aggiorna la posizione di partenza
+                    start_pos = highlight_end
+
+                # Inserisci il testo rimanente dopo l'ultima evidenziazione
+                if start_pos < len(item):
+                    self.text.insert(tk.END, item[start_pos:])
+            else:
+                # Nessuna evidenziazione necessaria
+                self.text.insert(tk.END, item)
+
+            # Aggiungi una nuova riga alla fine (tranne per l'ultimo elemento)
+            if i < len(items) - 1:
+                self.text.insert(tk.END, "\n")
+
+        # Disabilita nuovamente la modifica del testo
+        self.text.config(state=tk.DISABLED)
+
+    def _on_click(self, event):
+        """
+        Gestisce il click sul widget e attiva il callback di selezione.
+
+        Args:
+            event: Evento di click
+        """
+        # Ottieni la riga corrente
+        index = self.text.index(f"@{event.x},{event.y}")
+        line = int(index.split('.')[0]) - 1
+
+        # Verifica che la riga sia valida
+        if 0 <= line < len(self.items):
+            # Seleziona visivamente la riga
+            self.text.tag_remove("sel", "1.0", tk.END)
+            self.text.tag_add("sel", f"{line + 1}.0", f"{line + 1}.end")
+
+            # Chiama il callback di selezione
+            if self.selection_callback:
+                self.selection_callback(line)
+
+    def bind_selection(self, callback):
+        """
+        Imposta il callback da chiamare quando viene selezionato un elemento.
+
+        Args:
+            callback: Funzione da chiamare con l'indice dell'elemento selezionato
+        """
+        self.selection_callback = callback
+
+    def get_selection(self):
+        """
+        Restituisce l'indice dell'elemento selezionato.
+
+        Returns:
+            L'indice dell'elemento selezionato o None se nessuno è selezionato
+        """
+        try:
+            start = self.text.index("sel.first")
+            if start:
+                line = int(start.split('.')[0]) - 1
+                return line
+        except:
+            pass
+        return None
+
+    def get(self, index):
+        """
+        Restituisce l'elemento all'indice specificato.
+
+        Args:
+            index: Indice dell'elemento
+
+        Returns:
+            L'elemento all'indice specificato
+        """
+        if 0 <= index < len(self.items):
+            return self.items[index]
+        return None
+
+
 class IniEditorApp:
     """
     Applicazione per visualizzare e modificare file .ini con interfaccia grafica.
@@ -322,6 +477,7 @@ class IniEditorApp:
     - Visualizzare e modificare sezioni, valori e commenti inline
     - Salvare le modifiche su file
     - Creare nuove sezioni e coppie chiave-valore
+    - Cercare e filtrare sezioni e proprietà
     """
 
     def __init__(self, root):
@@ -337,7 +493,9 @@ class IniEditorApp:
 
         self.config = CustomConfigParser(comment_prefixes=('#', ';'))
         self.current_file = None
-        self.current_section = None  # Aggiungiamo una variabile per tenere traccia della sezione corrente
+        self.current_section = None
+        self.search_text = ""  # Variabile per memorizzare il testo di ricerca
+        self.search_var = tk.StringVar()
 
         # Configura scorciatoie da tastiera
         self.setup_keyboard_shortcuts()
@@ -351,53 +509,6 @@ class IniEditorApp:
         self.root.bind('<Control-s>', lambda event: self.save_file())
         if platform.system() == 'Darwin':  # macOS
             self.root.bind('<Command-s>', lambda event: self.save_file())
-
-    def center_window(self, window, width=None, height=None):
-        """
-        Centra una finestra di dialogo rispetto alla finestra principale.
-
-        Args:
-            window: La finestra di dialogo da centrare
-            width: Larghezza della finestra (opzionale)
-            height: Altezza della finestra (opzionale)
-        """
-        if width is not None and height is not None:
-            window.geometry(f"{width}x{height}")
-
-        window.withdraw()
-        window.update_idletasks()
-
-        # Ottiene le dimensioni della finestra
-        win_width = window.winfo_width()
-        win_height = window.winfo_height()
-
-        # Ottiene le dimensioni dello schermo
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-
-        # Ottiene la posizione della finestra principale
-        main_x = self.root.winfo_rootx()
-        main_y = self.root.winfo_rooty()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-
-        # Calcola la posizione centrata
-        x = main_x + (main_width - win_width) // 2
-        y = main_y + (main_height - win_height) // 2
-
-        # Verifica che la finestra sia visibile nello schermo
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-        if x + win_width > screen_width:
-            x = screen_width - win_width
-        if y + win_height > screen_height:
-            y = screen_height - win_height
-
-        # Imposta la posizione della finestra
-        window.geometry(f"{win_width}x{win_height}+{x}+{y}")
-        window.deiconify()
 
     def _create_menu(self):
         """Crea la barra del menu per l'applicazione."""
@@ -416,6 +527,23 @@ class IniEditorApp:
 
     def _create_ui(self):
         """Crea gli elementi dell'interfaccia utente."""
+        # Frame per la barra di ricerca
+        self.search_frame = ttk.Frame(self.root)
+        self.search_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(self.search_frame, text="Cerca:").pack(side=tk.LEFT, padx=(0, 5))
+
+        # Variabile di controllo per il campo di ricerca
+        self.search_var.trace_add("write", self._on_search_change)
+
+        # Campo di ricerca
+        self.search_entry = ttk.Entry(self.search_frame, textvariable=self.search_var, width=30)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Pulsante per pulire la ricerca
+        ttk.Button(self.search_frame, text="✖", width=3,
+                   command=self._clear_search).pack(side=tk.LEFT, padx=5)
+
         # Frame principale con divisore
         self.main_frame = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -441,7 +569,7 @@ class IniEditorApp:
         section_scrollbar = ttk.Scrollbar(section_container)
         section_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Lista sezioni
+        # Listbox standard per le sezioni
         self.section_listbox = tk.Listbox(section_container, yscrollcommand=section_scrollbar.set)
         self.section_listbox.pack(fill=tk.BOTH, expand=True)
         section_scrollbar.config(command=self.section_listbox.yview)
@@ -495,6 +623,9 @@ class IniEditorApp:
         self.property_tree.column("Valore", width=200, minwidth=100)
         self.property_tree.column("Note", width=350, minwidth=150)
 
+        # Configura i tag per l'evidenziazione
+        self.property_tree.tag_configure("match", background="#FFFF99")
+
         self.property_tree.pack(fill=tk.BOTH, expand=True)
         self.property_tree.bind("<Double-1>", self.on_property_double_click)
 
@@ -504,12 +635,95 @@ class IniEditorApp:
         ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W).pack(
             side=tk.BOTTOM, fill=tk.X)
 
+    def _clear_search(self):
+        """Pulisce il campo di ricerca."""
+        self.search_var.set("")
+        self.search_entry.focus()
+
+    def _on_search_change(self, *args):
+        """
+        Gestisce il cambiamento del testo nella barra di ricerca.
+
+        Args:
+            *args: Parametri passati dalla trace function
+        """
+        self.search_text = self.search_var.get()
+
+        # Aggiorna la lista delle sezioni filtrate
+        self.update_section_list()
+
+        # Se c'è una sezione selezionata, aggiorna anche la lista delle proprietà
+        if self.current_section:
+            self.update_property_list(self.current_section)
+
+    def _on_section_select_index(self, index):
+        """
+        Gestisce la selezione di una sezione dalla lista usando l'indice.
+
+        Args:
+            index: Indice dell'elemento selezionato
+        """
+        if index is not None:
+            section = self.section_listbox.get(index)
+            if section:
+                self.current_section = section
+                self.section_label_var.set(f"Sezione: [{section}]")
+                self.update_property_list(section)
+
+    def center_window(self, window, width=None, height=None):
+        """
+        Centra una finestra di dialogo rispetto alla finestra principale.
+
+        Args:
+            window: La finestra di dialogo da centrare
+            width: Larghezza della finestra (opzionale)
+            height: Altezza della finestra (opzionale)
+        """
+        if width is not None and height is not None:
+            window.geometry(f"{width}x{height}")
+
+        window.withdraw()
+        window.update_idletasks()
+
+        # Ottiene le dimensioni della finestra
+        win_width = window.winfo_width()
+        win_height = window.winfo_height()
+
+        # Ottiene le dimensioni dello schermo
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+
+        # Ottiene la posizione della finestra principale
+        main_x = self.root.winfo_rootx()
+        main_y = self.root.winfo_rooty()
+        main_width = self.root.winfo_width()
+        main_height = self.root.winfo_height()
+
+        # Calcola la posizione centrata
+        x = main_x + (main_width - win_width) // 2
+        y = main_y + (main_height - win_height) // 2
+
+        # Verifica che la finestra sia visibile nello schermo
+        if x < 0:
+            x = 0
+        if y < 0:
+            y = 0
+        if x + win_width > screen_width:
+            x = screen_width - win_width
+        if y + win_height > screen_height:
+            y = screen_height - win_height
+
+        # Imposta la posizione della finestra
+        window.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        window.deiconify()
+
     def new_file(self):
         """Crea un nuovo file .ini vuoto."""
         self.config = CustomConfigParser(comment_prefixes=('#', ';'))
         self.current_file = None
         self.current_section = None
         self.section_label_var.set("Nessuna sezione selezionata")
+        self.search_var.set("")  # Reset della ricerca
         self.update_section_list()
         self.property_tree.delete(*self.property_tree.get_children())
         self.status_var.set("Nuovo file creato")
@@ -529,11 +743,13 @@ class IniEditorApp:
             self.current_file = filepath
             self.current_section = None
             self.section_label_var.set("Nessuna sezione selezionata")
+            self.search_var.set("")  # Reset della ricerca
             self.update_section_list()
             self.property_tree.delete(*self.property_tree.get_children())
             self.status_var.set(f"File aperto: {os.path.basename(filepath)}")
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile aprire il file:\n{str(e)}")
+            print(f"Errore durante l'apertura del file: {str(e)}")
 
     def save_file(self, event=None):
         """
@@ -566,26 +782,6 @@ class IniEditorApp:
         self.current_file = filepath
         self.save_file()
 
-    def update_section_list(self):
-        """Aggiorna la lista delle sezioni nell'interfaccia."""
-        self.section_listbox.delete(0, tk.END)
-        for section in self.config.get_sections():
-            self.section_listbox.insert(tk.END, section)
-
-    def update_property_list(self, section):
-        """
-        Aggiorna la lista delle proprietà per la sezione selezionata.
-
-        Args:
-            section: Il nome della sezione di cui visualizzare le proprietà
-        """
-        self.property_tree.delete(*self.property_tree.get_children())
-        if section in self.config:
-            for key, value in self.config[section].items():
-                # Ottiene il commento inline associato
-                comment = self.config.get_inline_comment(section, key)
-                self.property_tree.insert("", tk.END, values=(key, value, comment))
-
     def on_section_select(self, event):
         """Gestisce la selezione di una sezione dalla lista."""
         selection = self.section_listbox.curselection()
@@ -594,6 +790,65 @@ class IniEditorApp:
             self.current_section = section  # Aggiorna la sezione corrente
             self.section_label_var.set(f"Sezione: [{section}]")  # Aggiorna l'etichetta
             self.update_property_list(section)
+
+    def update_section_list(self):
+        """Aggiorna la lista delle sezioni nell'interfaccia applicando il filtro di ricerca."""
+        self.section_listbox.delete(0, tk.END)
+        search_text = self.search_text.lower()
+
+        # Se la ricerca è vuota o troppo corta, mostra tutte le sezioni
+        if not search_text or len(search_text) < 2:
+            for section in self.config.get_sections():
+                self.section_listbox.insert(tk.END, section)
+            return
+
+        # Filtra le sezioni
+        for section in self.config.get_sections():
+            # Controlla se la sezione contiene il testo cercato
+            if search_text in section.lower():
+                self.section_listbox.insert(tk.END, section)
+                continue
+
+            # Controlla se qualche proprietà nella sezione contiene il testo cercato
+            for key, value in self.config.items(section):
+                comment = self.config.get_inline_comment(section, key)
+                if (search_text in key.lower() or
+                        search_text in value.lower() or
+                        (comment and search_text in comment.lower())):
+                    self.section_listbox.insert(tk.END, section)
+                    break
+
+    def update_property_list(self, section):
+        """
+        Aggiorna la lista delle proprietà per la sezione selezionata applicando il filtro di ricerca.
+
+        Args:
+            section: Il nome della sezione di cui visualizzare le proprietà
+        """
+        self.property_tree.delete(*self.property_tree.get_children())
+        search_text = self.search_text.lower()
+
+        if section not in self.config:
+            return
+
+        # Se la ricerca è vuota o troppo corta, mostra tutte le proprietà
+        if not search_text or len(search_text) < 2:
+            for key, value in self.config[section].items():
+                comment = self.config.get_inline_comment(section, key)
+                self.property_tree.insert("", tk.END, values=(key, value, comment))
+            return
+
+        # Filtra le proprietà
+        for key, value in self.config[section].items():
+            comment = self.config.get_inline_comment(section, key)
+
+            # Controlla se la chiave, il valore o il commento contengono il testo cercato
+            if (search_text in key.lower() or
+                    search_text in value.lower() or
+                    (comment and search_text in comment.lower())):
+                # Inserisci con tag di evidenziazione
+                self.property_tree.insert("", tk.END, values=(key, value, comment),
+                                          tags=("match",))
 
     def on_property_double_click(self, event):
         """Gestisce il doppio click su una proprietà per modificarla."""
@@ -691,15 +946,12 @@ class IniEditorApp:
                     self.config.add_section(section_name)
                     self.update_section_list()
 
-                    # Seleziona la nuova sezione
-                    sections = self.config.get_sections()
-                    idx = sections.index(section_name)
-                    self.section_listbox.selection_clear(0, tk.END)
-                    self.section_listbox.selection_set(idx)
-                    self.section_listbox.see(idx)
-                    self.current_section = section_name
-                    self.section_label_var.set(f"Sezione: [{section_name}]")
-                    self.update_property_list(section_name)
+                    # Trova l'indice della nuova sezione nella lista filtrata
+                    for i, section in enumerate(self.section_listbox.items):
+                        if section == section_name:
+                            # Simula la selezione della nuova sezione
+                            self._on_section_select_index(i)
+                            break
 
                     self.status_var.set(f"Sezione '{section_name}' aggiunta")
                 else:
